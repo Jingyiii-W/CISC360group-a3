@@ -98,17 +98,15 @@ instance Show TruthTable where
   You may use the built-in function "nub", which takes a list and returns the list
   without duplicates.
 -}
-getAtoms :: Formula -> [Variable] -> Formula -> [Variable]
+getAtoms :: Formula -> [Variable]
 
-getAtoms vList Top               = vList
-getAtoms vList Bot               = vList
-
-getAtoms vList (ATOM v)          = nub (v:vList)
-
-getAtoms vList (Not phi)         = getAtoms vList phi
-getAtoms vList (And phi1 phi2)   = getAtoms (getAtoms vList phi1) phi2
-getAtoms vList (Or phi1 phi2)    = getAtoms (getAtoms vList phi1) phi2
-getAtoms vList (Implies phi psi) = getAtoms (getAtoms vList phi) psi
+getAtoms Top               = []
+getAtoms Bot               = []
+getAtoms (Atom v)          = [v]
+getAtoms (Not phi)         = nub (getAtoms phi)
+getAtoms (And phi1 phi2)   = nub (getAtoms phi1 ++ getAtoms phi2)
+getAtoms (Or phi1 phi2)    = nub (getAtoms phi1 ++ getAtoms phi2)
+getAtoms (Implies phi psi) = nub (getAtoms phi ++ getAtoms psi)
 
 {-
    Q2b: getValuations:
@@ -117,7 +115,7 @@ getAtoms vList (Implies phi psi) = getAtoms (getAtoms vList phi) psi
 -}
 getValuations :: [Variable] -> [Valuation]
 getValuations []       = [[]]
-getValuations (c : cs) = let f xs = [(c, True) : xs, (c,False) : xs] in concat (map f (getValuations cs))
+getValuations (c : cs) = let f xs = [(c,True):xs, (c,False):xs] in concat (map f (getValuations (cs)))
 
 {-
   Hint: To apply a function f to every element of a list xs,
@@ -136,10 +134,12 @@ evalF :: Valuation -> Formula -> Bool
 evalF _    Top                 = True
 evalF _    Bot                 = False
 evalF valu (Not phi1)          = not (evalF valu phi1)
-evalF valu (ATOM c)            = case (lookup c valu) of {(Just a) -> a; _ -> error "This is not valid valuations"}
+evalF valu (Atom c)            = (elem(c,True)valu)
 evalF valu (And phi1 phi2)     = (evalF valu phi1) && (evalF valu phi2)
 evalF valu (Or phi1 phi2)      = (evalF valu phi1) || (evalF valu phi2)
-evalF valu (Implies phi1 phi2) = (not (evalF valu phi1)) || (evalF valu phi2)
+evalF valu (Implies phi1 phi2) = (not(evalF valu phi1)) || (evalF valu phi2)
+
+
 
 -- buildTable:
 --  Build a truth table for a given formula.
@@ -151,137 +151,3 @@ buildTable psi =
   in
     TruthTable (zip valuations
                     (map (\valu -> evalF valu psi) valuations))
-
-
-{-
-Q3: Tiny Theorem Prover
-
-    In this question, you will complete an implementation of a
-    continuation-based backtracking theorem prover that supports the rules
-    given in a3.pdf.
- 
-    The prover is structured using two functions that do all the work,
-    and one function that "kicks off" the process by passing continuations:
-
-       prove'      looks at the goal formula (the formula we're trying to prove),
-                     trying the -Right rules;
- 
-       prove_left  looks at the assumptions, trying the -Left rules;
-
-       prove       kicks off the process by calling prove'.
-
-    [X] Use-Assumption
-    [ ] Top-Right
-    [X] Implies-Right
-    [ ] And-Right
-    [ ] Or-Right-1 and Or-Right-2
-    
-    [X] Implies-Left
-    [X] And-Left
-    [ ] Or-Left
-
-    You do not need to handle the Bot and Not formulas in this question.
--}
-
--- a Context is a list of Formulas, representing assumptions
-type Context = [Formula]
-
-{-
-  prove': Given a context, a formula, and two continuations representing success and failure,
-          call the appropriate continuation.
--}
-prove' :: Context         -- formulas being assumed (to the left of the turnstile  |-  )
-       -> Formula         -- goal formula to be proved (to the right of the turnstile)
-       -> (() -> b,       -- kSucceed: call this if we proved the formula
-           () -> b)       -- kFail: call this if we can't prove the formula
-       -> b
-prove' ctx goal (kSucceed, kFail) =
-  let call_prove_left () = prove_left ctx ([], ctx) goal (kSucceed, kFail)
-  in
-    if elem goal ctx then  -- Use-Assumption rule
-      kSucceed ()
-    else
-      case goal of
-        Top               -> -- Top-Right rule
-                             undefined
-                             
-        Implies phi psi   -> -- Implies-Right rule
-                             prove' (phi : ctx) psi (kSucceed, kFail)
-        
-        And phi1 phi2     -> -- And-Right rule
-                             undefined
-                                              
-        Or phi1 phi2      -> -- Or-Right rules (try Or-Right-1, if it fails, try Or-Right-2)
-                             undefined
-        
-        _                 -> -- Can't use any of the -Right rules at this moment, so:
-                             call_prove_left ()
-
-{-
-  prove_left: Given an original context,
-                    a context that prove_left has already processed,
-                    a context that prove_left has not processed,
-                    a goal formula,
-                    and two continuations,
-                    call the appropriate continuation.
--}
-prove_left :: Context              -- the original context
-           -> (Context, Context)   -- the "done" context, and the "to do" context
-           -> Formula              -- the goal formula
-           -> (() -> b,            -- kSucceed: call this if we proved the formula
-               () -> b)            -- kFail: call this if we can't prove the formula
-           -> b
-           
-prove_left original (done, []) goal (kSucceed, kFail) =
-                       --  ^^ the "to do" context is empty, so there's nothing remaining to examine
-    if original == done then
-        -- prove_left looked at everything but didn't change the context at all, so fail
-        kFail ()
-    else
-        -- prove_left changed something, so we are giving prove' stronger assumptions
-        prove' done goal (kSucceed, kFail)
-        
-prove_left original (done, focus : rest) goal (kSucceed, kFail) =
-
-    let leave_alone () =   -- leave_alone: Call this to move "focus", the head of the to-do list,
-                           --              into the "done" list without changing "focus"
-            prove_left original (done ++ [focus], rest) goal (kSucceed, kFail)
-    in
-      case focus of
-        Implies phi1 phi2 ->   -- Implies-Left rule
-            prove' (done ++ rest) phi1 (-- kSucceed:
-                                        \() -> prove' (done ++ [phi2] ++ rest)
-                                                       goal
-                                                       (kSucceed, kFail),
-                                        -- kFail:
-                                        leave_alone)
-        
-        And phi1 phi2 ->       -- And-Left rule
-            prove_left original (done, [phi1, phi2] ++ rest) goal (kSucceed, kFail)
-        
-        Or phi1 phi2 ->        -- Or-Left rule
-            undefined
-        
-        focus -> leave_alone ()
-
-{-1
-  prove: Given a context and a formula,
-         return True if the formula is provable using the rules given in a3.pdf,
-            and False otherwise.
--}
-prove :: Context -> Formula -> Bool
-prove ctx goal = prove' ctx goal (\() -> True,   -- On success, return True
-                                  \() -> False)  -- On failure, return False
-
-
-test_imp1 = prove [Implies vB vC] (Implies vB vC)
-test_imp2 = prove [Implies vB vC] (Implies (And vB vB) vC)
-test_imp3 = not (prove [Implies (And vB vD) vC] (Implies vB vC))
-
-test_imps = test_imp1 && test_imp2 && test_imp3
-
-test_or1 = prove [Or vA vB] (Or vB vA)
-test_or2 = prove [Or vC (And vA (Implies vA vB))] (Or vB vC)
-test_or3 = prove [vA, Or (Implies vA vB) (Implies vA vC)] (Or vB (Or vB vC))
-test_or4 = not (prove [Or vC (And vA (Implies vA vD))] (Or vB vC))
-test_ors = test_or1 && test_or2 && test_or3 && test_or4
